@@ -7,6 +7,17 @@
 #include "wlr-output-management-unstable-v1-client-protocol.h"
 
 struct randr_state;
+struct randr_head;
+
+struct randr_mode {
+	struct randr_head *head;
+	struct zwlr_output_mode_v1 *wlr_mode;
+	struct wl_list link;
+
+	int32_t width, height;
+	int32_t refresh; // mHz
+	bool preferred;
+};
 
 struct randr_head {
 	struct randr_state *state;
@@ -14,9 +25,11 @@ struct randr_head {
 	struct wl_list link;
 
 	char *name, *description;
-	int32_t phys_width, phys_height;
+	int32_t phys_width, phys_height; // mm
+	struct wl_list modes;
 
 	bool enabled;
+	struct randr_mode *mode;
 };
 
 struct randr_state {
@@ -32,12 +45,73 @@ static void print_state(struct randr_state *state) {
 	wl_list_for_each(head, &state->heads, link) {
 		printf("%s \"%s\"\n", head->name, head->description);
 		if (head->phys_width > 0 && head->phys_height > 0) {
-			printf("  Physical size: %dx%d\n",
+			printf("  Physical size: %dx%d mm\n",
 				head->phys_width, head->phys_height);
 		}
 		printf("  Enabled: %s\n", head->enabled ? "yes" : "no");
+		if (!wl_list_empty(&head->modes)) {
+			printf("  Modes:\n");
+			struct randr_mode *mode;
+			wl_list_for_each(mode, &head->modes, link) {
+				printf("    %xx%x px, %f Hz", mode->width, mode->height,
+					(float)mode->refresh / 1000);
+				bool current = head->mode == mode;
+				if (current || mode->preferred) {
+					printf(" (");
+					if (mode->preferred) {
+						printf("preferred");
+					}
+					if (current && mode->preferred) {
+						printf(", ");
+					}
+					if (current) {
+						printf("current");
+					}
+					printf(")");
+				}
+				printf("\n");
+			}
+		}
+
+		if (!head->enabled) {
+			continue;
+		}
 	}
 }
+
+static void mode_handle_size(void *data, struct zwlr_output_mode_v1 *wlr_mode,
+		int32_t width, int32_t height) {
+	struct randr_mode *mode = data;
+	mode->width = width;
+	mode->height = height;
+}
+
+static void mode_handle_refresh(void *data,
+		struct zwlr_output_mode_v1 *wlr_mode, int32_t refresh) {
+	struct randr_mode *mode = data;
+	mode->refresh = refresh;
+}
+
+static void mode_handle_preferred(void *data,
+		struct zwlr_output_mode_v1 *wlr_mode) {
+	struct randr_mode *mode = data;
+	mode->preferred = true;
+}
+
+static void mode_handle_finished(void *data,
+		struct zwlr_output_mode_v1 *wlr_mode) {
+	struct randr_mode *mode = data;
+	wl_list_remove(&mode->link);
+	zwlr_output_mode_v1_destroy(mode->wlr_mode);
+	free(mode);
+}
+
+static const struct zwlr_output_mode_v1_listener mode_listener = {
+	.size = mode_handle_size,
+	.refresh = mode_handle_refresh,
+	.preferred = mode_handle_preferred,
+	.finished = mode_handle_finished,
+};
 
 static void head_handle_name(void *data,
 		struct zwlr_output_head_v1 *wlr_head, const char *name) {
@@ -58,16 +132,48 @@ static void head_handle_physical_size(void *data,
 	head->phys_height = height;
 }
 
+static void head_handle_mode(void *data,
+		struct zwlr_output_head_v1 *wlr_head,
+		struct zwlr_output_mode_v1 *wlr_mode) {
+	struct randr_head *head = data;
+
+	struct randr_mode *mode = calloc(1, sizeof(*mode));
+	mode->head = head;
+	mode->wlr_mode = wlr_mode;
+	wl_list_insert(&head->modes, &mode->link);
+
+	zwlr_output_mode_v1_add_listener(wlr_mode, &mode_listener, mode);
+}
+
 static void head_handle_enabled(void *data,
 		struct zwlr_output_head_v1 *wlr_head, int32_t enabled) {
 	struct randr_head *head = data;
 	head->enabled = !!enabled;
+	if (!enabled) {
+		head->mode = NULL;
+	}
+}
+
+static void head_handle_current_mode(void *data,
+		struct zwlr_output_head_v1 *wlr_head,
+		struct zwlr_output_mode_v1 *wlr_mode) {
+	struct randr_head *head = data;
+	struct randr_mode *mode;
+	wl_list_for_each(mode, &head->modes, link) {
+		if (mode->wlr_mode == wlr_mode) {
+			head->mode = mode;
+			return;
+		}
+	}
+	fprintf(stderr, "received unknown current_mode\n");
+	head->mode = NULL;
 }
 
 static void head_handle_finished(void *data,
 		struct zwlr_output_head_v1 *wlr_head) {
 	struct randr_head *head = data;
 	wl_list_remove(&head->link);
+	zwlr_output_head_v1_destroy(head->wlr_head);
 	free(head->name);
 	free(head->description);
 	free(head);
@@ -77,7 +183,9 @@ static const struct zwlr_output_head_v1_listener head_listener = {
 	.name = head_handle_name,
 	.description = head_handle_description,
 	.physical_size = head_handle_physical_size,
+	.mode = head_handle_mode,
 	.enabled = head_handle_enabled,
+	.current_mode = head_handle_current_mode,
 	.finished = head_handle_finished,
 };
 
@@ -89,6 +197,7 @@ static void output_manager_handle_head(void *data,
 	struct randr_head *head = calloc(1, sizeof(*head));
 	head->state = state;
 	head->wlr_head = wlr_head;
+	wl_list_init(&head->modes);
 	wl_list_insert(&state->heads, &head->link);
 
 	zwlr_output_head_v1_add_listener(wlr_head, &head_listener, head);
