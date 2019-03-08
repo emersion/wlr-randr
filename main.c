@@ -30,6 +30,9 @@ struct randr_head {
 
 	bool enabled;
 	struct randr_mode *mode;
+	int32_t x, y;
+	enum wl_output_transform transform;
+	double scale;
 };
 
 struct randr_state {
@@ -39,6 +42,28 @@ struct randr_state {
 	uint32_t serial;
 	bool running;
 };
+
+static const char *output_transform_str(enum wl_output_transform transform) {
+	switch (transform) {
+	case WL_OUTPUT_TRANSFORM_NORMAL:
+		return "normal";
+	case WL_OUTPUT_TRANSFORM_90:
+		return "90";
+	case WL_OUTPUT_TRANSFORM_180:
+		return "180";
+	case WL_OUTPUT_TRANSFORM_270:
+		return "270";
+	case WL_OUTPUT_TRANSFORM_FLIPPED:
+		return "flipped";
+	case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+		return "flipped-90";
+	case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+		return "flipped-180";
+	case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+		return "flipped-270";
+	}
+	return NULL;
+}
 
 static void print_state(struct randr_state *state) {
 	struct randr_head *head;
@@ -53,7 +78,7 @@ static void print_state(struct randr_state *state) {
 			printf("  Modes:\n");
 			struct randr_mode *mode;
 			wl_list_for_each(mode, &head->modes, link) {
-				printf("    %xx%x px, %f Hz", mode->width, mode->height,
+				printf("    %dx%d px, %f Hz", mode->width, mode->height,
 					(float)mode->refresh / 1000);
 				bool current = head->mode == mode;
 				if (current || mode->preferred) {
@@ -76,6 +101,10 @@ static void print_state(struct randr_state *state) {
 		if (!head->enabled) {
 			continue;
 		}
+
+		printf("  Position: %d,%d\n", head->x, head->y);
+		printf("  Transform: %s\n", output_transform_str(head->transform));
+		printf("  Scale: %f\n", head->scale);
 	}
 }
 
@@ -169,6 +198,25 @@ static void head_handle_current_mode(void *data,
 	head->mode = NULL;
 }
 
+static void head_handle_position(void *data,
+		struct zwlr_output_head_v1 *wlr_head, int32_t x, int32_t y) {
+	struct randr_head *head = data;
+	head->x = x;
+	head->y = y;
+}
+
+static void head_handle_transform(void *data,
+		struct zwlr_output_head_v1 *wlr_head, int32_t transform) {
+	struct randr_head *head = data;
+	head->transform = transform;
+}
+
+static void head_handle_scale(void *data,
+		struct zwlr_output_head_v1 *wlr_head, wl_fixed_t scale) {
+	struct randr_head *head = data;
+	head->scale = wl_fixed_to_double(scale);
+}
+
 static void head_handle_finished(void *data,
 		struct zwlr_output_head_v1 *wlr_head) {
 	struct randr_head *head = data;
@@ -186,6 +234,9 @@ static const struct zwlr_output_head_v1_listener head_listener = {
 	.mode = head_handle_mode,
 	.enabled = head_handle_enabled,
 	.current_mode = head_handle_current_mode,
+	.position = head_handle_position,
+	.transform = head_handle_transform,
+	.scale = head_handle_scale,
 	.finished = head_handle_finished,
 };
 
