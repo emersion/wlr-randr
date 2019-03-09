@@ -1,4 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
+#include <assert.h>
+#include <errno.h>
+#include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,29 +44,19 @@ struct randr_state {
 	struct wl_list heads;
 	uint32_t serial;
 	bool running;
+	bool failed;
 };
 
-static const char *output_transform_str(enum wl_output_transform transform) {
-	switch (transform) {
-	case WL_OUTPUT_TRANSFORM_NORMAL:
-		return "normal";
-	case WL_OUTPUT_TRANSFORM_90:
-		return "90";
-	case WL_OUTPUT_TRANSFORM_180:
-		return "180";
-	case WL_OUTPUT_TRANSFORM_270:
-		return "270";
-	case WL_OUTPUT_TRANSFORM_FLIPPED:
-		return "flipped";
-	case WL_OUTPUT_TRANSFORM_FLIPPED_90:
-		return "flipped-90";
-	case WL_OUTPUT_TRANSFORM_FLIPPED_180:
-		return "flipped-180";
-	case WL_OUTPUT_TRANSFORM_FLIPPED_270:
-		return "flipped-270";
-	}
-	return NULL;
-}
+static const char *output_transform_map[] = {
+	[WL_OUTPUT_TRANSFORM_NORMAL] = "normal",
+	[WL_OUTPUT_TRANSFORM_90] = "90",
+	[WL_OUTPUT_TRANSFORM_180] = "180",
+	[WL_OUTPUT_TRANSFORM_270] = "270",
+	[WL_OUTPUT_TRANSFORM_FLIPPED] = "flipped",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_90] = "flipped-90",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_180] = "flipped-180",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_270] = "flipped-270",
+};
 
 static void print_state(struct randr_state *state) {
 	struct randr_head *head;
@@ -103,9 +96,74 @@ static void print_state(struct randr_state *state) {
 		}
 
 		printf("  Position: %d,%d\n", head->x, head->y);
-		printf("  Transform: %s\n", output_transform_str(head->transform));
+		printf("  Transform: %s\n", output_transform_map[head->transform]);
 		printf("  Scale: %f\n", head->scale);
 	}
+
+	state->running = false;
+}
+
+static void config_handle_succeeded(void *data,
+		struct zwlr_output_configuration_v1 *config) {
+	struct randr_state *state = data;
+	zwlr_output_configuration_v1_destroy(config);
+	state->running = false;
+}
+
+static void config_handle_failed(void *data,
+		struct zwlr_output_configuration_v1 *config) {
+	struct randr_state *state = data;
+	zwlr_output_configuration_v1_destroy(config);
+	state->running = false;
+	state->failed = true;
+
+	fprintf(stderr, "failed to apply configuration\n");
+}
+
+static void config_handle_cancelled(void *data,
+		struct zwlr_output_configuration_v1 *config) {
+	struct randr_state *state = data;
+	zwlr_output_configuration_v1_destroy(config);
+	state->running = false;
+	state->failed = true;
+
+	fprintf(stderr, "configuration cancelled, please try again\n");
+}
+
+static const struct zwlr_output_configuration_v1_listener config_listener = {
+	.succeeded = config_handle_succeeded,
+	.failed = config_handle_failed,
+	.cancelled = config_handle_cancelled,
+};
+
+static void apply_state(struct randr_state *state) {
+	struct zwlr_output_configuration_v1 *config =
+		zwlr_output_manager_v1_create_configuration(state->output_manager,
+		state->serial);
+	zwlr_output_configuration_v1_add_listener(config, &config_listener, state);
+
+	struct randr_head *head;
+	wl_list_for_each(head, &state->heads, link) {
+		if (!head->enabled) {
+			zwlr_output_configuration_v1_disable_head(config, head->wlr_head);
+			continue;
+		}
+
+		struct zwlr_output_configuration_head_v1 *config_head =
+			zwlr_output_configuration_v1_enable_head(config, head->wlr_head);
+		if (head->mode != NULL) {
+			zwlr_output_configuration_head_v1_set_mode(config_head,
+				head->mode->wlr_mode);
+		}
+		zwlr_output_configuration_head_v1_set_position(config_head,
+			head->x, head->y);
+		zwlr_output_configuration_head_v1_set_transform(config_head,
+			head->transform);
+		zwlr_output_configuration_head_v1_set_scale(config_head,
+			wl_fixed_from_double(head->scale));
+	}
+
+	zwlr_output_configuration_v1_apply(config);
 }
 
 static void mode_handle_size(void *data, struct zwlr_output_mode_v1 *wlr_mode,
@@ -258,9 +316,6 @@ static void output_manager_handle_done(void *data,
 		struct zwlr_output_manager_v1 *manager, uint32_t serial) {
 	struct randr_state *state = data;
 	state->serial = serial;
-
-	print_state(state);
-	state->running = false;
 }
 
 static void output_manager_handle_finished(void *data,
@@ -296,6 +351,121 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_handle_global_remove,
 };
 
+static const struct option long_options[] = {
+	{"help", no_argument, 0, 'h'},
+	{"output", required_argument, 0, 0},
+	{"on", no_argument, 0, 0},
+	{"off", no_argument, 0, 0},
+	{"mode", required_argument, 0, 0},
+	{"preferred", no_argument, 0, 0},
+	{"pos", required_argument, 0, 0},
+	{"transform", required_argument, 0, 0},
+	{"scale", required_argument, 0, 0},
+	{0},
+};
+
+static bool parse_output_arg(struct randr_head *head,
+		const char *name, const char *value) {
+	if (strcmp(name, "on") == 0) {
+		head->enabled = true;
+	} else if (strcmp(name, "off") == 0) {
+		head->enabled = false;
+	} else if (strcmp(name, "mode") == 0) {
+		char *cur = (char *)value;
+		char *end;
+		int width = strtol(cur, &end, 10);
+		if (end[0] != 'x' || cur == end) {
+			fprintf(stderr, "invalid mode: %s\n", value);
+			return false;
+		}
+
+		cur = end + 1;
+		int height = strtol(cur, &end, 10);
+		if (end[0] != '\0') {
+			// TODO: refresh
+
+			fprintf(stderr, "invalid mode: %s\n", value);
+			return false;
+		}
+
+		bool found = false;
+		struct randr_mode *mode;
+		wl_list_for_each(mode, &head->modes, link) {
+			if (mode->width == width && mode->height == height) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			fprintf(stderr, "unknown mode: %s\n", value);
+			return false;
+		}
+
+		head->mode = mode;
+	} else if (strcmp(name, "pos") == 0) {
+		char *cur = (char *)value;
+		char *end;
+		int x = strtol(cur, &end, 10);
+		if (end[0] != ',' || cur == end) {
+			fprintf(stderr, "invalid position: %s\n", value);
+			return false;
+		}
+
+		cur = end + 1;
+		int y = strtol(cur, &end, 10);
+		if (end[0] != '\0') {
+			fprintf(stderr, "invalid position: %s\n", value);
+			return false;
+		}
+
+		head->x = x;
+		head->y = y;
+	} else if (strcmp(name, "transform") == 0) {
+		bool found = false;
+		size_t len =
+			sizeof(output_transform_map) / sizeof(output_transform_map[0]);
+		for (size_t i = 0; i < len; ++i) {
+			if (strcmp(output_transform_map[i], value) == 0) {
+				found = true;
+				head->transform = i;
+				break;
+			}
+		}
+
+		if (!found) {
+			fprintf(stderr, "invalid transform: %s\n", value);
+			return false;
+		}
+	} else if (strcmp(name, "scale") == 0) {
+		char *end;
+		double scale = strtod(value, &end);
+		if (end[0] != '\0' || value == end) {
+			fprintf(stderr, "invalid scale: %s\n", value);
+			return false;
+		}
+
+		head->scale = scale;
+	} else {
+		fprintf(stderr, "invalid option: %s\n", name);
+		return false;
+	}
+
+	return true;
+}
+
+static const char usage[] =
+	"usage: wlr-randr [options…]\n"
+	"--help\n"
+	"--output <name>\n"
+	"  --on\n"
+	"  --off\n"
+	"  --mode <width>x<height>\n"
+	"  --preferred\n"
+	"  --pos <x>,<y>\n"
+	"  --transform normal|90|180|270|flipped|flipped-90|flipped-180|flipped-270\n"
+	"  --scale <factor>\n";
+
 int main(int argc, char *argv[]) {
 	struct randr_state state = { .running = true };
 	wl_list_init(&state.heads);
@@ -317,6 +487,60 @@ int main(int argc, char *argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	while (state.serial == 0) {
+		if (wl_display_dispatch(display) < 0) {
+			fprintf(stderr, "wl_display_dispatch failed\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	bool changed = false;
+	struct randr_head *current_head = NULL;
+	while (1) {
+		int option_index = -1;
+		int c = getopt_long(argc, argv, "h", long_options, &option_index);
+		if (c < 0) {
+			break;
+		} else if (c == 'h') {
+			fprintf(stderr, "%s", usage);
+			return EXIT_SUCCESS;
+		}
+
+		const char *name = long_options[option_index].name;
+		const char *value = optarg;
+		if (strcmp(name, "output") == 0) {
+			bool found = false;
+			wl_list_for_each(current_head, &state.heads, link) {
+				if (strcmp(current_head->name, value) == 0) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				fprintf(stderr, "unknown output %s\n", value);
+				return EXIT_FAILURE;
+			}
+			continue;
+		}
+
+		if (current_head == NULL) {
+			fprintf(stderr, "no --output specified before --%s\n", name);
+			return EXIT_FAILURE;
+		}
+
+		if (!parse_output_arg(current_head, name, value)) {
+			return EXIT_FAILURE;
+		}
+
+		changed = true;
+	}
+
+	if (changed) {
+		apply_state(&state);
+	} else {
+		print_state(&state);
+	}
+
 	while (state.running && wl_display_dispatch(display) != -1) {
 		// This space intentionally left blank
 	}
@@ -326,5 +550,5 @@ int main(int argc, char *argv[]) {
 	wl_registry_destroy(registry);
 	wl_display_disconnect(display);
 
-	return EXIT_SUCCESS;
+	return state.failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
