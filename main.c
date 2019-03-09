@@ -501,6 +501,8 @@ int main(int argc, char *argv[]) {
 		int c = getopt_long(argc, argv, "h", long_options, &option_index);
 		if (c < 0) {
 			break;
+		} else if (c == '?') {
+			return EXIT_FAILURE;
 		} else if (c == 'h') {
 			fprintf(stderr, "%s", usage);
 			return EXIT_SUCCESS;
