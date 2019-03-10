@@ -371,27 +371,61 @@ static bool parse_output_arg(struct randr_head *head,
 	} else if (strcmp(name, "off") == 0) {
 		head->enabled = false;
 	} else if (strcmp(name, "mode") == 0) {
+		int refresh = 0;
+
 		char *cur = (char *)value;
 		char *end;
 		int width = strtol(cur, &end, 10);
 		if (end[0] != 'x' || cur == end) {
-			fprintf(stderr, "invalid mode: %s\n", value);
+			fprintf(stderr, "invalid mode: invalid width: %s\n", value);
 			return false;
 		}
 
 		cur = end + 1;
 		int height = strtol(cur, &end, 10);
-		if (end[0] != '\0') {
-			// TODO: refresh
-
-			fprintf(stderr, "invalid mode: %s\n", value);
+		if (cur == end) {
+			fprintf(stderr, "invalid mode: invalid height: %s\n", value);
 			return false;
+		}
+		if (end[0] != '\0') {
+			// whitespace + "px"
+			cur = end;
+			while (cur[0] == ' ') {
+				cur++;
+			}
+			if (strncmp(cur, "px", 2) == 0) {
+				cur += 2;
+			}
+
+			if (cur[0] != '\0') {
+				// "," or "@" + whitespace + refresh
+				if (cur[0] == ',' || cur[0] == '@') {
+					cur++;
+				} else {
+					fprintf(stderr, "invalid mode: expected refresh rate: %s\n",
+						value);
+					return false;
+				}
+				while (cur[0] == ' ') {
+					cur++;
+				}
+				double refresh_hz = strtod(cur, &end);
+				if ((end[0] != '\0' && strcmp(end, "Hz") != 0) ||
+						cur == end || refresh_hz <= 0) {
+					fprintf(stderr, "invalid mode: invalid refresh rate: %s\n",
+						value);
+					return false;
+				}
+
+				refresh = refresh_hz * 1000; // Hz → mHz
+			}
 		}
 
 		bool found = false;
 		struct randr_mode *mode;
 		wl_list_for_each(mode, &head->modes, link) {
-			if (mode->width == width && mode->height == height) {
+			if (mode->width == width && mode->height == height &&
+					(refresh == 0 || mode->refresh == refresh)) {
 				found = true;
 				break;
 			}
