@@ -71,8 +71,10 @@ static void print_state(struct randr_state *state) {
 			printf("  Modes:\n");
 			struct randr_mode *mode;
 			wl_list_for_each(mode, &head->modes, link) {
-				printf("    %dx%d px, %f Hz", mode->width, mode->height,
-					(float)mode->refresh / 1000);
+				printf("    %dx%d px", mode->width, mode->height);
+				if (mode->refresh > 0) {
+					printf(", %f Hz", (float)mode->refresh / 1000);
+				}
 				bool current = head->mode == mode;
 				if (current || mode->preferred) {
 					printf(" (");
