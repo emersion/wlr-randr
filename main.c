@@ -368,7 +368,6 @@ static const struct option long_options[] = {
 	{"off", no_argument, 0, 0},
 	{"mode", required_argument, 0, 0},
 	{"custom-mode", required_argument, 0, 0},
-	{"preferred", no_argument, 0, 0},
 	{"pos", required_argument, 0, 0},
 	{"transform", required_argument, 0, 0},
 	{"scale", required_argument, 0, 0},
@@ -529,8 +528,7 @@ static const char usage[] =
 	"--output <name>\n"
 	"  --on\n"
 	"  --off\n"
-	"  --mode <width>x<height>\n"
-	"  --preferred\n"
+	"  --mode|--custom-mode <width>x<height>[@<refresh>Hz]\n"
 	"  --pos <x>,<y>\n"
 	"  --transform normal|90|180|270|flipped|flipped-90|flipped-180|flipped-270\n"
 	"  --scale <factor>\n";
