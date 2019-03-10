@@ -33,6 +33,10 @@ struct randr_head {
 
 	bool enabled;
 	struct randr_mode *mode;
+	struct {
+		int32_t width, height;
+		int32_t refresh;
+	} custom_mode;
 	int32_t x, y;
 	enum wl_output_transform transform;
 	double scale;
@@ -156,6 +160,10 @@ static void apply_state(struct randr_state *state) {
 		if (head->mode != NULL) {
 			zwlr_output_configuration_head_v1_set_mode(config_head,
 				head->mode->wlr_mode);
+		} else {
+			zwlr_output_configuration_head_v1_set_custom_mode(config_head,
+				head->custom_mode.width, head->custom_mode.height,
+				head->custom_mode.refresh);
 		}
 		zwlr_output_configuration_head_v1_set_position(config_head,
 			head->x, head->y);
@@ -359,12 +367,69 @@ static const struct option long_options[] = {
 	{"on", no_argument, 0, 0},
 	{"off", no_argument, 0, 0},
 	{"mode", required_argument, 0, 0},
+	{"custom-mode", required_argument, 0, 0},
 	{"preferred", no_argument, 0, 0},
 	{"pos", required_argument, 0, 0},
 	{"transform", required_argument, 0, 0},
 	{"scale", required_argument, 0, 0},
 	{0},
 };
+
+static bool parse_mode(const char *value, int *width, int *height,
+		int *refresh) {
+	*refresh = 0;
+
+	// width + "x" + height
+	char *cur = (char *)value;
+	char *end;
+	*width = strtol(cur, &end, 10);
+	if (end[0] != 'x' || cur == end) {
+		fprintf(stderr, "invalid mode: invalid width: %s\n", value);
+		return false;
+	}
+
+	cur = end + 1;
+	*height = strtol(cur, &end, 10);
+	if (cur == end) {
+		fprintf(stderr, "invalid mode: invalid height: %s\n", value);
+		return false;
+	}
+	if (end[0] != '\0') {
+		// whitespace + "px"
+		cur = end;
+		while (cur[0] == ' ') {
+			cur++;
+		}
+		if (strncmp(cur, "px", 2) == 0) {
+			cur += 2;
+		}
+
+		if (cur[0] != '\0') {
+			// ("," or "@") + whitespace + refresh
+			if (cur[0] == ',' || cur[0] == '@') {
+				cur++;
+			} else {
+				fprintf(stderr, "invalid mode: expected refresh rate: %s\n",
+					value);
+				return false;
+			}
+			while (cur[0] == ' ') {
+				cur++;
+			}
+			double refresh_hz = strtod(cur, &end);
+			if ((end[0] != '\0' && strcmp(end, "Hz") != 0) ||
+					cur == end || refresh_hz <= 0) {
+				fprintf(stderr, "invalid mode: invalid refresh rate: %s\n",
+					value);
+				return false;
+			}
+
+			*refresh = refresh_hz * 1000; // Hz → mHz
+		}
+	}
+
+	return true;
+}
 
 static bool parse_output_arg(struct randr_head *head,
 		const char *name, const char *value) {
@@ -373,54 +438,9 @@ static bool parse_output_arg(struct randr_head *head,
 	} else if (strcmp(name, "off") == 0) {
 		head->enabled = false;
 	} else if (strcmp(name, "mode") == 0) {
-		int refresh = 0;
-
-		char *cur = (char *)value;
-		char *end;
-		int width = strtol(cur, &end, 10);
-		if (end[0] != 'x' || cur == end) {
-			fprintf(stderr, "invalid mode: invalid width: %s\n", value);
+		int width, height, refresh;
+		if (!parse_mode(value, &width, &height, &refresh)) {
 			return false;
-		}
-
-		cur = end + 1;
-		int height = strtol(cur, &end, 10);
-		if (cur == end) {
-			fprintf(stderr, "invalid mode: invalid height: %s\n", value);
-			return false;
-		}
-		if (end[0] != '\0') {
-			// whitespace + "px"
-			cur = end;
-			while (cur[0] == ' ') {
-				cur++;
-			}
-			if (strncmp(cur, "px", 2) == 0) {
-				cur += 2;
-			}
-
-			if (cur[0] != '\0') {
-				// "," or "@" + whitespace + refresh
-				if (cur[0] == ',' || cur[0] == '@') {
-					cur++;
-				} else {
-					fprintf(stderr, "invalid mode: expected refresh rate: %s\n",
-						value);
-					return false;
-				}
-				while (cur[0] == ' ') {
-					cur++;
-				}
-				double refresh_hz = strtod(cur, &end);
-				if ((end[0] != '\0' && strcmp(end, "Hz") != 0) ||
-						cur == end || refresh_hz <= 0) {
-					fprintf(stderr, "invalid mode: invalid refresh rate: %s\n",
-						value);
-					return false;
-				}
-
-				refresh = refresh_hz * 1000; // Hz → mHz
-			}
 		}
 
 		bool found = false;
@@ -439,6 +459,19 @@ static bool parse_output_arg(struct randr_head *head,
 		}
 
 		head->mode = mode;
+		head->custom_mode.width = 0;
+		head->custom_mode.height = 0;
+		head->custom_mode.refresh = 0;
+	} else if (strcmp(name, "custom-mode") == 0) {
+		int width, height, refresh;
+		if (!parse_mode(value, &width, &height, &refresh)) {
+			return false;
+		}
+
+		head->mode = NULL;
+		head->custom_mode.width = width;
+		head->custom_mode.height = height;
+		head->custom_mode.refresh = refresh;
 	} else if (strcmp(name, "pos") == 0) {
 		char *cur = (char *)value;
 		char *end;

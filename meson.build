@@ -38,8 +38,6 @@ wayland_client = dependency('wayland-client')
 
 subdir('protocol')
 
-wlr_randr_inc = include_directories('include')
-
 wlr_randr_exe = executable(
 	meson.project_name(),
 	files(['main.c']),
