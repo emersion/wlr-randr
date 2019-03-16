@@ -46,15 +46,23 @@
 
       Output devices that display pixels (e.g. a physical monitor or a virtual
       output in a window) are represented as heads. Heads cannot be created nor
-      destroyed, but they can be enabled or disabled and their properties can be
-      changed. Each head may have one or more available modes.
+      destroyed by the client, but they can be enabled or disabled and their
+      properties can be changed. Each head may have one or more available modes.
 
-      Heads are advertised when the output manager is bound, and whenever they
-      appear.
+      Whenever a head appears (e.g. a monitor is plugged in), it will be
+      advertised via the head event. Immediately after the output manager is
+      bound, all current heads are advertised.
 
-      Whenever the number of heads or modes changes, the done event will be
-      sent. It carries a serial which can be used in a create_configuration
-      request to change heads properties.
+      Whenever a head's properties change, the relevant wlr_output_head events
+      will be sent. Not all head properties will be sent: only properties that
+      have changed need to.
+
+      Whenever a head disappears (e.g. a monitor is unplugged), a
+      wlr_output_head.finished event will be sent.
+
+      After one or more heads appear, change or disappear, the done event will
+      be sent. It carries a serial which can be used in a create_configuration
+      request to update heads properties.
 
       The information obtained from this protocol should only be used for output
       configuration purposes. This protocol is not designed to be a generic
@@ -64,7 +72,9 @@
 
     <event name="head">
       <description summary="introduce a new head">
-        This event introduces a new head.
+        This event introduces a new head. This happens whenever a new head
+        appears (e.g. a monitor is plugged in) or after the output manager is
+        bound.
       </description>
       <arg name="head" type="new_id" interface="zwlr_output_head_v1"/>
     </event>
@@ -75,7 +85,8 @@
         the output manager object and after any subsequent changes. This applies
         to child head and mode objects as well. In other words, this event is
         sent whenever a head or mode is created or destroyed and whenever one of
-        their properties has been changed.
+        their properties has been changed. Not all state is re-sent each time
+        the current configuration changes: only the actual changes are sent.
 
         This allows changes to the output configuration to be seen as atomic,
         even if they happen via multiple events.
@@ -121,7 +132,7 @@
       object only advertises properties and cannot be used directly to change
       them.
 
-      A head has some read-only properties: mode, name, description and
+      A head has some read-only properties: modes, name, description and
       physical_size. These cannot be changed by clients.
 
       Other properties can be updated via a wlr_output_configuration object.
@@ -371,6 +382,9 @@
         tested them.
 
         Upon receiving this event, the client should destroy this object.
+
+        If the current configuration has changed, events to describe the changes
+        will be sent followed by a wlr_output_manager.done event.
       </description>
     </event>
 
