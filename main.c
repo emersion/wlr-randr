@@ -316,6 +316,7 @@ static void output_manager_handle_head(void *data,
 	struct randr_head *head = calloc(1, sizeof(*head));
 	head->state = state;
 	head->wlr_head = wlr_head;
+	head->scale = 1.0;
 	wl_list_init(&head->modes);
 	wl_list_insert(&state->heads, &head->link);
 
@@ -430,9 +431,31 @@ static bool parse_mode(const char *value, int *width, int *height,
 	return true;
 }
 
+static void fixup_disabled_head(struct randr_head *head) {
+	if (!head->mode && head->custom_mode.refresh == 0 &&
+			head->custom_mode.width == 0 &&
+			head->custom_mode.height == 0) {
+		struct randr_mode *mode;
+		wl_list_for_each(mode, &head->modes, link) {
+			if (mode->preferred) {
+				head->mode = mode;
+				return;
+			}
+		}
+		/* Pick first element if when there's no preferred mode */
+		if (!wl_list_empty(&head->modes)) {
+			head->mode = wl_container_of(head->modes.next,
+					mode, link);
+		}
+	}
+}
+
 static bool parse_output_arg(struct randr_head *head,
 		const char *name, const char *value) {
 	if (strcmp(name, "on") == 0) {
+		if (!head->enabled) {
+			fixup_disabled_head(head);
+		}
 		head->enabled = true;
 	} else if (strcmp(name, "off") == 0) {
 		head->enabled = false;
