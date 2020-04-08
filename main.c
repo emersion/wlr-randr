@@ -142,7 +142,7 @@ static const struct zwlr_output_configuration_v1_listener config_listener = {
 	.cancelled = config_handle_cancelled,
 };
 
-static void apply_state(struct randr_state *state) {
+static void apply_state(struct randr_state *state, bool dry_run) {
 	struct zwlr_output_configuration_v1 *config =
 		zwlr_output_manager_v1_create_configuration(state->output_manager,
 		state->serial);
@@ -173,7 +173,11 @@ static void apply_state(struct randr_state *state) {
 			wl_fixed_from_double(head->scale));
 	}
 
-	zwlr_output_configuration_v1_apply(config);
+	if (dry_run) {
+		zwlr_output_configuration_v1_test(config);
+	} else {
+		zwlr_output_configuration_v1_apply(config);
+	}
 }
 
 static void mode_handle_size(void *data, struct zwlr_output_mode_v1 *wlr_mode,
@@ -364,6 +368,7 @@ static const struct wl_registry_listener registry_listener = {
 
 static const struct option long_options[] = {
 	{"help", no_argument, 0, 'h'},
+	{"dryrun", no_argument, 0, 0},
 	{"output", required_argument, 0, 0},
 	{"on", no_argument, 0, 0},
 	{"off", no_argument, 0, 0},
@@ -548,6 +553,7 @@ static bool parse_output_arg(struct randr_head *head,
 static const char usage[] =
 	"usage: wlr-randr [options…]\n"
 	"--help\n"
+	"--dryrun\n"
 	"--output <name>\n"
 	"  --on\n"
 	"  --off\n"
@@ -584,7 +590,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	bool changed = false;
+	bool changed = false, dry_run = false;
 	struct randr_head *current_head = NULL;
 	while (1) {
 		int option_index = -1;
@@ -612,23 +618,24 @@ int main(int argc, char *argv[]) {
 				fprintf(stderr, "unknown output %s\n", value);
 				return EXIT_FAILURE;
 			}
-			continue;
-		}
+		} else if (strcmp(name, "dryrun") == 0) {
+			dry_run = true;
+		} else { // output sub-option
+			if (current_head == NULL) {
+				fprintf(stderr, "no --output specified before --%s\n", name);
+				return EXIT_FAILURE;
+			}
 
-		if (current_head == NULL) {
-			fprintf(stderr, "no --output specified before --%s\n", name);
-			return EXIT_FAILURE;
-		}
+			if (!parse_output_arg(current_head, name, value)) {
+				return EXIT_FAILURE;
+			}
 
-		if (!parse_output_arg(current_head, name, value)) {
-			return EXIT_FAILURE;
+			changed = true;
 		}
-
-		changed = true;
 	}
 
 	if (changed) {
-		apply_state(&state);
+		apply_state(&state, dry_run);
 	} else {
 		print_state(&state);
 	}
