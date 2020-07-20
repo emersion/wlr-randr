@@ -11,6 +11,10 @@ project(
 	],
 )
 
+author = 'emersion'
+authorfullname = 'Simon Ser'
+authoremail = 'contact@emersion.fr'
+
 cc = meson.get_compiler('c')
 
 add_project_arguments(cc.get_supported_arguments([

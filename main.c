@@ -1,3 +1,9 @@
+/*
+  * Copyright (C) 2019-2020 Simon Ser <contact@emersion.fr>
+  * SPDX-License-Identifier: MIT
+  * Author: Simon Ser <contact@emersion.fr>
+  */
+
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <errno.h>
