@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <getopt.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -429,7 +430,7 @@ static bool parse_mode(const char *value, int *width, int *height,
 				return false;
 			}
 
-			*refresh = refresh_hz * 1000; // Hz → mHz
+			*refresh = round(refresh_hz * 1000); // Hz → mHz
 		}
 	}
 
