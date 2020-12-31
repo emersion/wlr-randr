@@ -36,11 +36,13 @@ add_project_arguments(cc.get_supported_arguments([
 
 wayland_client = dependency('wayland-client')
 
+m_dep = cc.find_library('m', required : false)
+
 subdir('protocol')
 
 wlr_randr_exe = executable(
 	meson.project_name(),
 	files(['main.c']),
-	dependencies: [wayland_client, client_protos],
+	dependencies: [wayland_client, client_protos, m_dep],
 	install: true,
 )
