@@ -374,6 +374,7 @@ static const struct option long_options[] = {
 	{"on", no_argument, 0, 0},
 	{"off", no_argument, 0, 0},
 	{"mode", required_argument, 0, 0},
+	{"preferred", no_argument, 0, 0},
 	{"custom-mode", required_argument, 0, 0},
 	{"pos", required_argument, 0, 0},
 	{"transform", required_argument, 0, 0},
@@ -490,6 +491,25 @@ static bool parse_output_arg(struct randr_head *head,
 		head->custom_mode.width = 0;
 		head->custom_mode.height = 0;
 		head->custom_mode.refresh = 0;
+	} else if (strcmp(name, "preferred") == 0) {
+		bool found = false;
+		struct randr_mode *mode;
+		wl_list_for_each(mode, &head->modes, link) {
+			if (mode->preferred) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			fprintf(stderr, "no preferred mode found\n");
+			return false;
+		}
+
+		head->mode = mode;
+		head->custom_mode.width = 0;
+		head->custom_mode.height = 0;
+		head->custom_mode.refresh = 0;
 	} else if (strcmp(name, "custom-mode") == 0) {
 		int width, height, refresh;
 		if (!parse_mode(value, &width, &height, &refresh)) {
@@ -559,6 +579,7 @@ static const char usage[] =
 	"  --on\n"
 	"  --off\n"
 	"  --mode|--custom-mode <width>x<height>[@<refresh>Hz]\n"
+	"  --preferred\n"
 	"  --pos <x>,<y>\n"
 	"  --transform normal|90|180|270|flipped|flipped-90|flipped-180|flipped-270\n"
 	"  --scale <factor>\n";
