@@ -1,14 +1,10 @@
 project(
-	'wlr-randr',
-	'c',
-	version: '0.2.0',
-	license: 'MIT',
-	meson_version: '>=0.47.0',
-	default_options: [
-		'c_std=c99',
-		'warning_level=3',
-		'werror=true',
-	],
+  'wlr-randr',
+  'c',
+version : '0.2.0',
+license : 'MIT',
+meson_version : '>=0.47.0',
+default_options : ['c_std=c99', 'warning_level=3', 'werror=true']
 )
 
 cc = meson.get_compiler('c')
