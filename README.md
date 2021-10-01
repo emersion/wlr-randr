@@ -2,6 +2,8 @@
 
 Utility to manage outputs of a Wayland compositor.
 
+> **Heads up!** This project has moved over [to SourceHut](https://sr.ht/~emersion/wlr-randr/).
+
 ## Building
 
 Install dependencies:
