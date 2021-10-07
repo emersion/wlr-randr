@@ -370,6 +370,7 @@ static const struct wl_registry_listener registry_listener = {
 static const struct option long_options[] = {
 	{"help", no_argument, 0, 'h'},
 	{"dryrun", no_argument, 0, 0},
+	{"query", no_argument, 0, 0},
 	{"output", required_argument, 0, 0},
 	{"on", no_argument, 0, 0},
 	{"off", no_argument, 0, 0},
@@ -575,6 +576,7 @@ static const char usage[] =
 	"usage: wlr-randr [options…]\n"
 	"--help\n"
 	"--dryrun\n"
+	"--query\n"
 	"--output <name>\n"
 	"  --on\n"
 	"  --off\n"
@@ -612,7 +614,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	bool changed = false, dry_run = false;
+	bool changed = false, dry_run = false, query = false;
 	struct randr_head *current_head = NULL;
 	while (1) {
 		int option_index = -1;
@@ -642,6 +644,8 @@ int main(int argc, char *argv[]) {
 			}
 		} else if (strcmp(name, "dryrun") == 0) {
 			dry_run = true;
+		} else if (strcmp(name, "query") == 0) {
+			query = true;
 		} else { // output sub-option
 			if (current_head == NULL) {
 				fprintf(stderr, "no --output specified before --%s\n", name);
@@ -656,10 +660,13 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (changed) {
-		apply_state(&state, dry_run);
-	} else {
+	if (!changed || query) {
 		print_state(&state);
+	}
+
+	if (changed) {
+		state.running = true;
+		apply_state(&state, dry_run);
 	}
 
 	while (state.running && wl_display_dispatch(display) != -1) {
